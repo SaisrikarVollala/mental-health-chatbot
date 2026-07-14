@@ -1,0 +1,28 @@
+# Virtual environment
+venv/
+
+# IDE / editor configs
+.vscode/
+.idea/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+
+# Large dataset files (too big for GitHub)
+*.csv
+*.zst
+
+# HuggingFace model cache
+.cache/
