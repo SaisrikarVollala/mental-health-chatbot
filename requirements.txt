@@ -1,0 +1,13 @@
+# Emotion detection
+torch
+transformers
+safetensors
+
+# Reddit dataset extraction
+zstandard
+orjson
+pandas
+
+# General
+huggingface-hub
+pydantic
