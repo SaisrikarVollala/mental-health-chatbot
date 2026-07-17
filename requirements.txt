@@ -8,6 +8,12 @@ zstandard
 orjson
 pandas
 
+#cause extraction 
+transformers
+
+#intent extraction
+spacy 
+
 # General
 huggingface-hub
 pydantic
