@@ -1,7 +1,8 @@
-import spacy
-from transformers import pipeline
 import warnings
-
+import os
+import sys
+from intent import extract_intent
+from severity import detect_severity
 # Suppress some noisy warnings from transformers if any
 warnings.filterwarnings("ignore")
 
@@ -17,42 +18,19 @@ except ImportError:
     emotion_service = None
 
 # Cause
-cause_pipeline = pipeline(
-    "token-classification",
-    model="tanfiona/unicausal-tok-baseline",
-    aggregation_strategy="simple"
-)
+cause_bosch_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cause_bosch")
+if cause_bosch_path not in sys.path:
+    sys.path.append(cause_bosch_path)
 
-# Intent
-nlp_intent = spacy.load("en_core_web_trf")
-
-def extract_intent(text):
-    doc = nlp_intent(text)
-    for token in doc:
-        if token.dep_ == "dobj":
-            action = token.head.lemma_
-            obj = token.text
-            return action, obj
-    return None, None
-
-# Severity
-severity_classifier = pipeline(
-    "zero-shot-classification",
-    model="MoritzLaurer/deberta-v3-large-zeroshot-v2.0",
-    device=-1
-)
-
-candidate_labels = [
-    "mild emotional distress that does not require immediate professional help",
-    "moderate mental health concern that should be evaluated by a mental health professional",
-    "mental health crisis requiring immediate medical or emergency intervention"
-]
-
-label_mapping = {
-    candidate_labels[0]: "Low",
-    candidate_labels[1]: "Medium",
-    candidate_labels[2]: "High"
-}
+try:
+    from cause_bosch.extract import CauseEffectExtractor
+    cause_extractor = CauseEffectExtractor(
+        model_dir="cause_bosch/",
+        base_model_name="roberta-large",
+    )
+except ImportError as e:
+    print(f"Warning: Could not import CauseEffectExtractor: {e}")
+    cause_extractor = None
 
 def analyze_query(query: str):
     print(f"\nAnalyzing query: '{query}'\n" + "-"*50)
@@ -66,10 +44,21 @@ def analyze_query(query: str):
         print("Emotion : Not available")
     
     # 2. Cause
-    cause_result = cause_pipeline(query)
-    # Extract just the words of the cause if present
-    causes = [entity['word'] for entity in cause_result] if cause_result else []
+    causes = []
+    effects = []
+    signals = []
+    if cause_extractor:
+        try:
+            cause_results = cause_extractor.predict([query])[0]
+            causes = [str(rel['cause']) for rel in cause_results if rel.get('cause')]
+            effects = [str(rel['effect']) for rel in cause_results if rel.get('effect')]
+            signals = [str(rel['signal']) for rel in cause_results if rel.get('signal')]
+        except Exception as e:
+            print(f"Error extracting cause/effect/signal: {e}")
+            
     print(f"Cause   : {', '.join(causes) if causes else 'None detected'}")
+    print(f"Effect  : {', '.join(effects) if effects else 'None detected'}")
+    print(f"Signal  : {', '.join(signals) if signals else 'None detected'}")
     
     # 3. Intent
     action, obj = extract_intent(query)
@@ -79,19 +68,15 @@ def analyze_query(query: str):
         print("Intent  : None detected")
     
     # 4. Severity
-    severity_result = severity_classifier(
-        query,
-        candidate_labels=candidate_labels,
-        hypothesis_template="This statement describes {}.",
-        multi_label=False
-    )
-    predicted_severity = label_mapping[severity_result["labels"][0]]
-    print(f"Severity: {predicted_severity} (Confidence: {severity_result['scores'][0]:.4f})")
+    predicted_severity, severity_score = detect_severity(query)
+    print(f"Severity: {predicted_severity} (Confidence: {severity_score:.4f})")
     print("-" * 50)
     
     return {
         "emotion": primary_emotion,
         "cause": causes,
+        "effect": effects,
+        "signal": signals,
         "intent": {"action": action, "object": obj},
         "severity": predicted_severity
     }
