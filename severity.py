@@ -1,13 +1,14 @@
 from transformers import pipeline
 
-def detect_severity(text):
+print("Loading Severity Model...")
+# Load the zero-shot classification pipeline globally
+classifier = pipeline(
+    "zero-shot-classification",
+    model="MoritzLaurer/deberta-v3-large-zeroshot-v2.0",
+    device=-1  # Use -1 for CPU, 0 for first GPU
+)
 
-    # Load the zero-shot classification pipeline
-    classifier = pipeline(
-        "zero-shot-classification",
-        model="MoritzLaurer/deberta-v3-large-zeroshot-v2.0",
-        device=-1  # Use -1 for CPU, 0 for first GPU
-    )
+def detect_severity(text):
 
     # Descriptive candidate labels
     candidate_labels = [
