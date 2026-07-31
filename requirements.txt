@@ -1,19 +1,18 @@
-# Emotion detection
+# ── End-to-End Pipeline & Models ──
 torch
 transformers
 safetensors
+spacy
+ollama
+python-dotenv
 
-# Reddit dataset extraction
-zstandard
-orjson
+# ── Knowledge Graph & RAG ──
+sentence-transformers
+networkx
+pdfplumber
+scikit-learn
 pandas
 
-#cause extraction 
-transformers
-
-#intent extraction
-spacy 
-
-# General
-huggingface-hub
+# ── Utilities ──
 pydantic
+huggingface-hub
