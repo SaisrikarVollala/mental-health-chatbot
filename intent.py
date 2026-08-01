@@ -10,4 +10,4 @@ def extract_intent(text):
             return action, obj
     return None, None
 
-print(extract_intent("i want to book a flight for hyderabad to chandigarh"))
+# print(extract_intent("i want to book a flight for hyderabad to chandigarh"))

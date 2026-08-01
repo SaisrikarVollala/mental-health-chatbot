@@ -25,7 +25,7 @@ if cause_bosch_path not in sys.path:
 try:
     from cause_bosch.extract import CauseEffectExtractor
     cause_extractor = CauseEffectExtractor(
-        model_dir="cause_bosch/",
+        model_dir=".",
         base_model_name="roberta-large",
     )
 except ImportError as e:
