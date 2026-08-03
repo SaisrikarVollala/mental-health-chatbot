@@ -24,8 +24,66 @@ import json
 import os
 from collections import defaultdict
 from itertools import combinations
+from functools import lru_cache
 
+import nltk
 import pdfplumber
+from nltk.stem import WordNetLemmatizer
+
+# Ensure wordnet data is available
+try:
+    nltk.data.find("corpora/wordnet")
+except LookupError:
+    nltk.download("wordnet", quiet=True)
+
+# Singleton lemmatizer instance
+_lemmatizer = WordNetLemmatizer()
+
+@lru_cache(maxsize=10000)
+def cached_lemmatize(word):
+    """Lemmatize with multiple POS tags, picking the shortest result."""
+    lemmas = [
+        _lemmatizer.lemmatize(word, pos='n'),  # noun
+        _lemmatizer.lemmatize(word, pos='v'),  # verb
+        _lemmatizer.lemmatize(word, pos='a'),  # adjective
+    ]
+    return min(lemmas, key=len)
+
+SYNONYM_MAP = {
+    "asd": "autism",
+    "adhd": "attention_deficit",
+    "ocd": "obsessive_compulsive",
+    "cbt": "cognitive_behavioral_therapy",
+    "dbt": "dialectical_behavior_therapy",
+    "ptsd": "post_traumatic_stress",
+    "ssri": "antidepressant",
+    "behavioural": "behavioral",
+    "behaviour": "behavior",
+    "analyse": "analyze",
+    "generalised": "generalized",
+}
+
+DOMAIN_BIGRAMS = {
+    "obsessive compulsive": "obsessive_compulsive",
+    "attention deficit": "attention_deficit",
+    "cognitive behavioral": "cognitive_behavioral",
+    "social anxiety": "social_anxiety",
+    "panic disorder": "panic_disorder",
+    "bipolar disorder": "bipolar_disorder",
+    "executive function": "executive_function",
+    "sensory processing": "sensory_processing",
+    "working memory": "working_memory",
+}
+
+def is_valid_word(word):
+    """Filter out noise and PDF artifacts."""
+    if len(set(word)) == 1:        # e.g., "aaa", "bbb"
+        return False
+    if len(word) > 25:             # Probably a PDF artifact
+        return False
+    if not any(c in 'aeiouy' for c in word):  # No vowels = not English
+        return False
+    return True
 
 
 # ──────────────────────────────────────────────────────────────
@@ -119,29 +177,68 @@ def extract_text_from_pdf(
 
 
 # ──────────────────────────────────────────────────────────────
-# Step 2: Split into paragraphs
+# Step 2: Split into overlapping chunks (sliding window)
 # ──────────────────────────────────────────────────────────────
 
-def split_into_paragraphs(pages: list[str]) -> list[str]:
-    """
-    Split page texts into individual paragraphs.
-    """
-    paragraphs = []
+CHUNK_SIZE = 300     # words per chunk
+CHUNK_OVERLAP = 75   # words of overlap between consecutive chunks
 
+def split_into_paragraphs(pages: list[str], chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
+    """
+    Split page texts into overlapping chunks using a sliding window.
+
+    Instead of splitting on blank lines (which can cut related content
+    across two paragraphs), we:
+      1. Clean all pages and join them into one continuous text.
+      2. Slide a window of `chunk_size` words forward by
+         `chunk_size - overlap` words each step.
+
+    This guarantees that the last `overlap` words of chunk N are also
+    the first `overlap` words of chunk N+1, so no context is ever
+    lost at a boundary.
+
+    Args:
+        pages:      List of raw page texts from the PDF.
+        chunk_size: Number of words per chunk (default 300).
+        overlap:    Number of overlapping words between chunks (default 75).
+
+    Returns:
+        List of text chunks (strings).
+    """
+    # Clean and merge all pages into one continuous text
+    cleaned_pages = []
     for page_text in pages:
-        # Clean PDF artifacts (header/footer noise)
         cleaned = re.sub(r'P1:MRM.*?CharCount=\d+', '', page_text)
         cleaned = re.sub(r'WU038.*?\d{4}\s+\d{2}:\d{2}', '', cleaned)
+        cleaned = cleaned.strip()
+        if cleaned:
+            cleaned_pages.append(cleaned)
 
-        # Split by blank lines
-        chunks = re.split(r'\n\s*\n', cleaned)
+    full_text = " ".join(cleaned_pages)
 
-        for chunk in chunks:
-            chunk = chunk.strip()
-            if len(chunk) > 30:
-                paragraphs.append(chunk)
+    # Normalize whitespace
+    full_text = re.sub(r'\s+', ' ', full_text).strip()
+    words = full_text.split()
 
-    return paragraphs
+    if not words:
+        return []
+
+    # Sliding window
+    chunks = []
+    step = chunk_size - overlap  # how far to advance each iteration
+    start = 0
+
+    while start < len(words):
+        end = start + chunk_size
+        chunk_text = " ".join(words[start:end])
+
+        # Only keep chunks with meaningful content (> 30 chars)
+        if len(chunk_text) > 30:
+            chunks.append(chunk_text)
+
+        start += step
+
+    return chunks
 
 
 # ──────────────────────────────────────────────────────────────
@@ -151,6 +248,9 @@ def split_into_paragraphs(pages: list[str]) -> list[str]:
 def clean_and_tokenize(text: str, stop_words: set) -> list[str]:
     """
     Clean a paragraph and return a list of meaningful words.
+
+    Applies bigram merging, synonym mapping, and advanced lemmatization
+    (nouns, verbs, adjectives) to normalize terms.
     """
     text = text.lower()
 
@@ -163,14 +263,29 @@ def clean_and_tokenize(text: str, stop_words: set) -> list[str]:
     # Collapse whitespace
     text = re.sub(r'\s+', ' ', text).strip()
 
-    # Tokenize and filter
+    # Apply bigram replacement BEFORE splitting
+    for bigram, replacement in DOMAIN_BIGRAMS.items():
+        text = text.replace(bigram, replacement)
+
+    # Tokenize, filter, and lemmatize
     words = text.split()
-    filtered = [
-        w for w in words
-        if w not in stop_words
-        and w not in DOMAIN_STOP_WORDS
-        and len(w) >= MIN_WORD_LENGTH
-    ]
+    filtered = []
+    for w in words:
+        if w in stop_words or w in DOMAIN_STOP_WORDS or len(w) < MIN_WORD_LENGTH:
+            continue
+            
+        if not is_valid_word(w):
+            continue
+
+        # Map synonyms
+        w = SYNONYM_MAP.get(w, w)
+
+        # Lemmatize (cached, multi-POS)
+        # Don't lemmatize bigrams containing underscores to avoid messing them up
+        if '_' not in w:
+            w = cached_lemmatize(w)
+            
+        filtered.append(w)
 
     return filtered
 
