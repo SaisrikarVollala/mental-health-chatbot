@@ -31,10 +31,25 @@ def main():
     
     while True:
         try:
-            user_input = input("\n👤 You: ")
-            if user_input.lower() in ['quit', 'exit', 'q']:
-                print("\nGoodbye!")
-                break
+            print("\n👤 You (paste text, press Enter twice to submit): ")
+            lines = []
+            while True:
+                try:
+                    line = input()
+                    if not line.strip() and lines:  # Stop on empty line if we have text
+                        break
+                    elif not line.strip() and not lines: # Ignore leading empty lines
+                        continue
+                    
+                    if line.lower() in ['quit', 'exit', 'q']:
+                        print("\nGoodbye!")
+                        return
+                        
+                    lines.append(line)
+                except EOFError:
+                    break
+            
+            user_input = "\n".join(lines)
             
             if user_input.strip():
                 # 1. Run Dialog Analysis (from pipeline.py)

@@ -236,7 +236,17 @@ Examples:
     if args:
         query = " ".join(args)
     else:
-        query = input("Enter your question: ")
+        print("Enter your question (paste your text, then press Enter twice to submit):")
+        lines = []
+        while True:
+            try:
+                line = input()
+                if not line.strip():  # Stop if the user enters an empty line
+                    break
+                lines.append(line)
+            except EOFError:
+                break
+        query = "\n".join(lines)
 
     print(f"\nSearching for: '{query}'")
 
